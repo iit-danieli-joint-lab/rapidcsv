@@ -386,6 +386,27 @@ namespace rapidcsv
 
 
     /**
+     * @brief   idjl: custom overload of Document constructor
+     * @param   csv_str               specifies an input c_str.
+     * @param   csv_len               specifies the length of c_str.
+     * @param   pLabelParams          specifies which row and column should be treated as labels.
+     * @param   pSeparatorParams      specifies which field and row separators should be used.
+     * @param   pConverterParams      specifies how invalid numbers (including empty strings) should be
+     *                                handled.
+     */
+    explicit Document(const char* csv_str, const int csv_len,
+        const LabelParams& pLabelParams = LabelParams(),
+        const SeparatorParams& pSeparatorParams = SeparatorParams(),
+        const ConverterParams& pConverterParams = ConverterParams())
+        : mPath()
+        , mLabelParams(pLabelParams)
+        , mSeparatorParams(pSeparatorParams)
+        , mConverterParams(pConverterParams)
+    {
+        ReadCsv(csv_str, csv_len);
+    }
+
+    /**
      * @brief   Copy constructor
      * @param   pDocument             specifies the Document instance to copy.
      */
@@ -972,6 +993,115 @@ namespace rapidcsv
       {
         stream.seekg(0, std::ios::beg);
         ReadCsv(stream);
+      }
+    }
+
+    /**
+      idjl: custom overload of ReadCsv
+    */
+    void ReadCsv(const char* csv_str, const int csv_len)
+    {
+      std::cerr<<"rapidcsv: Begin"<<std::endl;
+      int fileLength = csv_len;
+      const int bufLength = 64 * 1024;
+
+      std::cerr<<"rapidcsv: ReadCsv preparing buffer"<<std::endl;
+
+      std::vector<char> buffer(bufLength);
+      std::vector<std::string> row;
+      std::string cell;
+      bool quoted = false;
+      int cr = 0;
+      int lf = 0;
+
+      while (fileLength > 0)
+      {
+        std::cerr<<"rapidcsv: entering while loop"<<std::endl;
+        std::streamsize readLength = std::min(fileLength, bufLength);
+        fprintf(stderr,"rapidcsv: readLength %d\n", readLength);
+
+        for(int i=0; i<readLength ;i++) {
+          buffer[i] = csv_str[i];
+        }
+        std::cerr<<"~~~~~rapidcsv: Read done"<<std::endl;
+
+        for (int i = 0; i < readLength; ++i)
+        {
+          if (buffer[i] == '"')
+          {
+            if (cell.empty() || cell[0] == '"')
+            {
+              quoted = !quoted;
+            }
+            cell += buffer[i];
+          }
+          else if (buffer[i] == mSeparatorParams.mSeparator)
+          {
+            if (!quoted)
+            {
+              row.push_back(mSeparatorParams.mTrim ? Trim(cell) : cell);
+              cell.clear();
+            }
+            else
+            {
+              cell += buffer[i];
+            }
+          }
+          else if (buffer[i] == '\r')
+          {
+            ++cr;
+          }
+          else if (buffer[i] == '\n')
+          {
+            ++lf;
+            row.push_back(mSeparatorParams.mTrim ? Trim(cell) : cell);
+            cell.clear();
+            mData.push_back(row);
+            row.clear();
+            quoted = false; // disallow line breaks in quoted string, by auto-unquote at linebreak
+          }
+          else
+          {
+            cell += buffer[i];
+          }
+        }
+        fileLength -= readLength;
+        fprintf(stderr,"rapidcsv: File length %d\n", fileLength);
+      }
+      std::cerr<<"rapidcsv: outof while loop"<<std::endl;
+      // Handle last line without linebreak
+      if (!cell.empty() || !row.empty())
+      {
+        row.push_back(mSeparatorParams.mTrim ? Trim(cell) : cell);
+        cell.clear();
+        mData.push_back(row);
+        row.clear();
+      }
+
+      // Assume CR/LF if at least half the linebreaks have CR
+      mSeparatorParams.mHasCR = (cr > (lf / 2));
+
+      // Set up column labels
+      if ((mLabelParams.mColumnNameIdx >= 0) &&
+          (mData.size() > 0))
+      {
+        int i = 0;
+        for (auto& columnName : mData[mLabelParams.mColumnNameIdx])
+        {
+          mColumnNames[columnName] = i++;
+        }
+      }
+
+      // Set up row labels
+      if ((mLabelParams.mRowNameIdx >= 0) &&
+          (static_cast<ssize_t>(mData.size()) >
+           (mLabelParams.mColumnNameIdx + 1)))
+      {
+        int i = 0;
+        for (auto& dataRow : mData)
+        {
+          mRowNames[dataRow[mLabelParams.mRowNameIdx]] = i++;
+        }
       }
     }
 
